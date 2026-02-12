@@ -1,24 +1,24 @@
-# nanobot Skills
+# Habilidades (Skills) de nanobot
 
-This directory contains built-in skills that extend nanobot's capabilities.
+Este directorio contiene habilidades integradas que extienden las capacidades de nanobot.
 
-## Skill Format
+## Formato de Habilidad
 
-Each skill is a directory containing a `SKILL.md` file with:
-- YAML frontmatter (name, description, metadata)
-- Markdown instructions for the agent
+Cada habilidad es un directorio que contiene un archivo `SKILL.md` con:
+- Frontmatter YAML (nombre, descripción, metadatos)
+- Instrucciones Markdown para el agente
 
-## Attribution
+## Atribución
 
-These skills are adapted from [OpenClaw](https://github.com/openclaw/openclaw)'s skill system.
-The skill format and metadata structure follow OpenClaw's conventions to maintain compatibility.
+Estas habilidades están adaptadas del sistema de habilidades de [OpenClaw](https://github.com/openclaw/openclaw).
+El formato de habilidad y la estructura de metadatos siguen las convenciones de OpenClaw para mantener compatibilidad.
 
-## Available Skills
+## Habilidades Disponibles
 
-| Skill | Description |
-|-------|-------------|
-| `github` | Interact with GitHub using the `gh` CLI |
-| `weather` | Get weather info using wttr.in and Open-Meteo |
-| `summarize` | Summarize URLs, files, and YouTube videos |
-| `tmux` | Remote-control tmux sessions |
-| `skill-creator` | Create new skills |
+| Habilidad | Descripción |
+|-----------|-------------|
+| `github` | Interactuar con GitHub usando la CLI `gh` |
+| `weather` | Obtener información del clima usando wttr.in y Open-Meteo |
+| `summarize` | Resumir URLs, archivos y videos de YouTube |
+| `tmux` | Controlar remotamente sesiones de tmux |
+| `skill-creator` | Crear nuevas habilidades |

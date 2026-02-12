@@ -1,81 +1,81 @@
-# nanobot: Ultra-Lightweight Personal AI Assistant
+# nanobot: Asistente de IA Personal Ultra-Ligero
 
-## Project Overview
+## Descripción del Proyecto
 
-`nanobot` is a minimalist yet powerful AI assistant designed for personal use. It is built to be lightweight, extensible, and research-ready, featuring a modular architecture that separates the core agent logic, communication channels, skills, and LLM providers.
+`nanobot` es un asistente de IA minimalista pero poderoso diseñado para uso personal. Está construido para ser ligero, extensible y listo para investigación, presentando una arquitectura modular que separa la lógica central del agente, los canales de comunicación, las habilidades y los proveedores de LLM.
 
-**Key Characteristics:**
-*   **Ultra-Lightweight**: Core agent logic is ~4,000 lines of code.
-*   **Extensible**: Modular design for easy addition of new providers, channels, and skills.
-*   **Multi-Channel**: Supports communication via CLI, Telegram, Discord, WhatsApp, Feishu, Slack, Email, and more.
-*   **Local & Cloud LLMs**: Supports OpenAI, Anthropic, OpenRouter, and local models via vLLM.
+**Características Clave:**
+*   **Ultra-Ligero**: La lógica central del agente tiene ~4,000 líneas de código.
+*   **Extensible**: Diseño modular para fácil adición de nuevos proveedores, canales y habilidades.
+*   **Multi-Canal**: Soporta comunicación vía CLI, Telegram, Discord, WhatsApp, Feishu, Slack, Email, y más.
+*   **LLMs Locales y en la Nube**: Soporta OpenAI, Anthropic, OpenRouter, y modelos locales vía vLLM.
 
-## Architecture
+## Arquitectura
 
-The project follows a clean, component-based architecture:
+El proyecto sigue una arquitectura limpia basada en componentes:
 
-### 1. Core Agent (`nanobot/agent/`)
-The heart of `nanobot` is the `AgentLoop` (in `nanobot/agent/loop.py`). It orchestrates the entire interaction process:
-*   Receives messages from the **Message Bus**.
-*   Builds **Context** using `ContextBuilder`, incorporating conversation history, memory, and skills.
-*   Calls the configured **LLM Provider**.
-*   Parses the LLM response for **Tool Calls**.
-*   Executes tools via the **Tool Registry**.
-*   Updates **Memory** (short-term session and long-term consolidation).
-*   Sends the final response back via the **Message Bus**.
+### 1. Agente Central (`nanobot/agent/`)
+El corazón de `nanobot` es el `AgentLoop` (en `nanobot/agent/loop.py`). Orquesta todo el proceso de interacción:
+*   Recibe mensajes del **Bus de Mensajes**.
+*   Construye el **Contexto** usando `ContextBuilder`, incorporando historial de conversación, memoria y habilidades.
+*   Llama al **Proveedor de LLM** configurado.
+*   Analiza la respuesta del LLM en busca de **Llamadas a Herramientas**.
+*   Ejecuta herramientas vía el **Registro de Herramientas**.
+*   Actualiza la **Memoria** (sesión a corto plazo y consolidación a largo plazo).
+*   Envía la respuesta final de vuelta a través del **Bus de Mensajes**.
 
-### 2. Message Bus (`nanobot/bus/`)
-Facilitates asynchronous communication between external channels and the internal agent logic. Messages are routed using `InboundMessage` and `OutboundMessage` events.
+### 2. Bus de Mensajes (`nanobot/bus/`)
+Facilita la comunicación asíncrona entre canales externos y la lógica interna del agente. Los mensajes son enrutados usando eventos `InboundMessage` y `OutboundMessage`.
 
-### 3. Channels (`nanobot/channels/`)
-Each communication platform (Telegram, Discord, etc.) has a corresponding channel integration that:
-*   Receives messages from the platform API.
-*   Normalizes them into `InboundMessage` format.
-*   Publishes them to the bus.
-*   Subscribes to `OutboundMessage` events from the bus.
-*   Sends the response back to the user on the platform.
+### 3. Canales (`nanobot/channels/`)
+Cada plataforma de comunicación (Telegram, Discord, etc.) tiene una integración de canal correspondiente que:
+*   Recibe mensajes de la API de la plataforma.
+*   Los normaliza al formato `InboundMessage`.
+*   Los publica en el bus.
+*   Se suscribe a eventos `OutboundMessage` del bus.
+*   Envía la respuesta de vuelta al usuario en la plataforma.
 
-### 4. Providers (`nanobot/providers/`)
-Abstraction layer for different LLM backends. Standardizes interactions with OpenAI, Anthropic, OpenRouter, Local vLLM, and others, making it easy to switch models or providers.
+### 4. Proveedores (`nanobot/providers/`)
+Capa de abstracción para diferentes backends de LLM. Estandariza interacciones con OpenAI, Anthropic, OpenRouter, Local vLLM, y otros, haciendo fácil cambiar modelos o proveedores.
 
-### 5. Tools (`nanobot/agent/tools/`)
-Python classes that give the agent capabilities. Standard tools include:
-*   **File System**: Read, write, edit, list files.
-*   **Shell**: Execute bash commands.
-*   **Web**: Search (Brave) and fetch content.
-*   **Message**: Send messages.
-*   **Spawn**: Create sub-agents for parallel tasks.
-*   **Cron**: Schedule recurring tasks.
+### 5. Herramientas (`nanobot/agent/tools/`)
+Clases Python que dan capacidades al agente. Herramientas estándar incluyen:
+*   **Sistema de Archivos**: Leer, escribir, editar, listar archivos.
+*   **Shell**: Ejecutar comandos bash.
+*   **Web**: Buscar (Brave) y obtener contenido.
+*   **Mensaje**: Enviar mensajes.
+*   **Spawn**: Crear sub-agentes para tareas paralelas.
+*   **Cron**: Programar tareas recurrentes.
 
-### 6. Skills (`nanobot/skills/`)
-Skills are defined in `SKILL.md` files. They provide context and instructions to the LLM on how to perform specific high-level tasks, often by combining multiple tool calls (e.g., using `gh` CLI for GitHub interactions).
+### 6. Habilidades (`nanobot/skills/`)
+Las habilidades se definen en archivos `SKILL.md`. Proveen contexto e instrucciones al LLM sobre cómo realizar tareas específicas de alto nivel, a menudo combinando múltiples llamadas a herramientas (ej. usar `gh` CLI para interacciones con GitHub).
 
-### 7. Memory (`nanobot/agent/memory.py`)
-Implements a dual-memory system:
-*   **Short-term**: Active session history.
-*   **Long-term**: Periodically consolidated summaries and facts stored in `MEMORY.md` and `HISTORY.md`.
+### 7. Memoria (`nanobot/agent/memory.py`)
+Implementa un sistema de memoria dual:
+*   **Corto plazo**: Historial de sesión activo.
+*   **Largo plazo**: Resúmenes y hechos consolidados periódicamente almacenados en `MEMORY.md` y `HISTORY.md`.
 
-## Key Features
+## Funcionalidades Clave
 
-*   **Real-time Market Analysis**: Capable of fetching and analyzing financial data.
-*   **Full-Stack Engineering**: Can write code, run tests, and manage deployments.
-*   **Smart Routine Manager**: Handles scheduling and reminders via cron.
-*   **Personal Knowledge Assistant**: Maintains a persistent memory of user preferences and facts.
-*   **Voice Transcription**: Supports Whisper for transcribing voice messages (e.g., from Telegram).
+*   **Análisis de Mercado en Tiempo Real**: Capaz de obtener y analizar datos financieros.
+*   **Ingeniería Full-Stack**: Puede escribir código, ejecutar pruebas y gestionar despliegues.
+*   **Gestor de Rutina Inteligente**: Maneja programación y recordatorios vía cron.
+*   **Asistente de Conocimiento Personal**: Mantiene una memoria persistente de preferencias y hechos del usuario.
+*   **Transcripción de Voz**: Soporta Whisper para transcribir mensajes de voz (ej. desde Telegram).
 
-## How it Works (Workflow)
+## Cómo Funciona (Flujo de Trabajo)
 
-1.  **Input**: A user sends a message via a channel (e.g., Telegram).
-2.  **Routing**: The channel adapter converts the message to an internal event and pushes it to the message bus.
-3.  **Processing**: The `AgentLoop` picks up the message.
-4.  **Context Construction**: The agent retrieves session history and relevant context.
-5.  **Reasoning**: The LLM is invoked with the context and available tools.
-6.  **Action**: If the LLM decides to use a tool (e.g., `web_search`), the agent executes it and feeds the result back to the LLM. This loop continues until the task is complete.
-7.  **Response**: The final answer is sent back through the bus to the original channel.
+1.  **Entrada**: Un usuario envía un mensaje vía un canal (ej. Telegram).
+2.  **Enrutamiento**: El adaptador de canal convierte el mensaje a un evento interno y lo empuja al bus de mensajes.
+3.  **Procesamiento**: El `AgentLoop` recoge el mensaje.
+4.  **Construcción de Contexto**: El agente recupera el historial de sesión y contexto relevante.
+5.  **Razonamiento**: El LLM es invocado con el contexto y herramientas disponibles.
+6.  **Acción**: Si el LLM decide usar una herramienta (ej. `web_search`), el agente la ejecuta y alimenta el resultado de vuelta al LLM. Este bucle continúa hasta que la tarea se completa.
+7.  **Respuesta**: La respuesta final se envía de vuelta a través del bus al canal original.
 
-## Extensibility
+## Extensibilidad
 
-*   **Add a Provider**: Register a new `ProviderSpec` in `nanobot/providers/registry.py` and add configuration in `nanobot/config/schema.py`.
-*   **Add a Tool**: Subclass `Tool` in `nanobot/agent/tools/base.py`, implement `execute`, and register it in `AgentLoop`.
-*   **Add a Skill**: Create a new directory in `nanobot/skills/` with a `SKILL.md` file containing instructions.
-*   **Add a Channel**: Implement a new channel adapter in `nanobot/channels/` that interfaces with the platform's API and the message bus.
+*   **Añadir un Proveedor**: Registra un nuevo `ProviderSpec` en `nanobot/providers/registry.py` y añade configuración en `nanobot/config/schema.py`.
+*   **Añadir una Herramienta**: Subclasea `Tool` en `nanobot/agent/tools/base.py`, implementa `execute`, y regístralo en `AgentLoop`.
+*   **Añadir una Habilidad**: Crea un nuevo directorio en `nanobot/skills/` con un archivo `SKILL.md` conteniendo instrucciones.
+*   **Añadir un Canal**: Implementa un nuevo adaptador de canal en `nanobot/channels/` que interconecte con la API de la plataforma y el bus de mensajes.
