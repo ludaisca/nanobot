@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import json
+import os
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -180,23 +181,62 @@ class SessionManager:
         Returns:
             List of session info dicts.
         """
-        sessions = []
-        
-        for path in self.sessions_dir.glob("*.jsonl"):
+        cache_path = self.sessions_dir / ".sessions_metadata.json"
+        cache = {}
+        if cache_path.exists():
             try:
-                # Read just the metadata line
-                with open(path) as f:
-                    first_line = f.readline().strip()
-                    if first_line:
-                        data = json.loads(first_line)
-                        if data.get("_type") == "metadata":
-                            sessions.append({
-                                "key": path.stem.replace("_", ":"),
-                                "created_at": data.get("created_at"),
-                                "updated_at": data.get("updated_at"),
-                                "path": str(path)
-                            })
+                with open(cache_path) as f:
+                    cache = json.load(f)
             except Exception:
+                pass
+
+        sessions = []
+        updated_cache = {}
+        cache_changed = False
+
+        for entry in os.scandir(self.sessions_dir):
+            if not entry.is_file() or not entry.name.endswith(".jsonl"):
                 continue
-        
+
+            mtime = entry.stat().st_mtime
+            cached_entry = cache.get(entry.name)
+
+            if cached_entry and cached_entry.get("mtime") == mtime:
+                session_info = cached_entry["data"]
+                sessions.append(session_info)
+                updated_cache[entry.name] = cached_entry
+            else:
+                try:
+                    path = Path(entry.path)
+                    # Read just the metadata line
+                    with open(path) as f:
+                        first_line = f.readline().strip()
+                        if first_line:
+                            data = json.loads(first_line)
+                            if data.get("_type") == "metadata":
+                                session_info = {
+                                    "key": path.stem.replace("_", ":"),
+                                    "created_at": data.get("created_at"),
+                                    "updated_at": data.get("updated_at"),
+                                    "path": str(path)
+                                }
+                                sessions.append(session_info)
+                                updated_cache[entry.name] = {
+                                    "mtime": mtime,
+                                    "data": session_info
+                                }
+                                cache_changed = True
+                except Exception:
+                    continue
+
+        if len(updated_cache) != len(cache):
+            cache_changed = True
+
+        if cache_changed:
+            try:
+                with open(cache_path, "w") as f:
+                    json.dump(updated_cache, f)
+            except Exception:
+                pass
+
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
