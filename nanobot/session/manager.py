@@ -25,6 +25,8 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
+    _persisted_count: int = field(default=0, repr=False)
+    _persisted_tail_content: str | None = field(default=None, repr=False)
     
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -124,12 +126,15 @@ class SessionManager:
                     else:
                         messages.append(data)
             
-            return Session(
+            session = Session(
                 key=key,
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 metadata=metadata
             )
+            session._persisted_count = len(messages)
+            session._persisted_tail_content = messages[-1].get("content") if messages else None
+            return session
         except Exception as e:
             logger.warning(f"Failed to load session {key}: {e}")
             return None
@@ -138,6 +143,34 @@ class SessionManager:
         """Save a session to disk."""
         path = self._get_session_path(session.key)
         
+        # Optimize: if session exists on disk and we are just adding messages, append.
+        # Check: ensuring the last persisted message content matches what's in memory.
+        # This guards against cases where history is modified (e.g. replaced with new list).
+        can_append = False
+        if (session._persisted_count > 0 and
+            session._persisted_count < len(session.messages) and
+            path.exists()):
+            try:
+                last_persisted_idx = session._persisted_count - 1
+                if (0 <= last_persisted_idx < len(session.messages) and
+                    session.messages[last_persisted_idx].get("content") == session._persisted_tail_content):
+                    can_append = True
+            except Exception:
+                pass
+
+        if can_append:
+            try:
+                with open(path, "a") as f:
+                    for msg in session.messages[session._persisted_count:]:
+                        f.write(json.dumps(msg) + "\n")
+                session._persisted_count = len(session.messages)
+                session._persisted_tail_content = session.messages[-1].get("content")
+                self._cache[session.key] = session
+                return
+            except Exception as e:
+                logger.warning(f"Failed to append to session {session.key}, falling back to rewrite: {e}")
+
+        # Full rewrite (new session, consolidation, or fallback)
         with open(path, "w") as f:
             # Write metadata first
             metadata_line = {
@@ -152,6 +185,8 @@ class SessionManager:
             for msg in session.messages:
                 f.write(json.dumps(msg) + "\n")
         
+        session._persisted_count = len(session.messages)
+        session._persisted_tail_content = session.messages[-1].get("content") if session.messages else None
         self._cache[session.key] = session
     
     def delete(self, key: str) -> bool:
@@ -214,10 +249,12 @@ class SessionManager:
                         if first_line:
                             data = json.loads(first_line)
                             if data.get("_type") == "metadata":
+                                # Use mtime for updated_at because we append-only without updating header
+                                updated_at = datetime.fromtimestamp(mtime).isoformat()
                                 session_info = {
                                     "key": path.stem.replace("_", ":"),
                                     "created_at": data.get("created_at"),
-                                    "updated_at": data.get("updated_at"),
+                                    "updated_at": updated_at,
                                     "path": str(path)
                                 }
                                 sessions.append(session_info)
