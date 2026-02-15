@@ -22,6 +22,54 @@ class SkillsLoader:
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self._file_cache: dict[str, dict] = {}
+
+    def _get_cached_skill(self, path: Path) -> dict | None:
+        """
+        Get cached skill content and metadata if file hasn't changed.
+
+        Returns:
+            Dict with 'content', 'metadata', 'mtime' or None if file missing.
+        """
+        try:
+            stat = path.stat()
+            mtime = stat.st_mtime
+        except FileNotFoundError:
+            return None
+
+        path_str = str(path)
+        if path_str in self._file_cache:
+            entry = self._file_cache[path_str]
+            if entry["mtime"] == mtime:
+                return entry
+
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            return None
+
+        metadata = self._parse_metadata(content)
+
+        entry = {
+            "mtime": mtime,
+            "content": content,
+            "metadata": metadata
+        }
+        self._file_cache[path_str] = entry
+        return entry
+
+    def _parse_metadata(self, content: str) -> dict:
+        """Parse frontmatter metadata from skill content."""
+        if content.startswith("---"):
+            match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
+            if match:
+                metadata = {}
+                for line in match.group(1).split("\n"):
+                    if ":" in line:
+                        key, value = line.split(":", 1)
+                        metadata[key.strip()] = value.strip().strip('"\'')
+                return metadata
+        return {}
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -68,14 +116,14 @@ class SkillsLoader:
         """
         # Check workspace first
         workspace_skill = self.workspace_skills / name / "SKILL.md"
-        if workspace_skill.exists():
-            return workspace_skill.read_text(encoding="utf-8")
+        if (cached := self._get_cached_skill(workspace_skill)):
+            return cached["content"]
         
         # Check built-in
         if self.builtin_skills:
             builtin_skill = self.builtin_skills / name / "SKILL.md"
-            if builtin_skill.exists():
-                return builtin_skill.read_text(encoding="utf-8")
+            if (cached := self._get_cached_skill(builtin_skill)):
+                return cached["content"]
         
         return None
     
@@ -210,19 +258,15 @@ class SkillsLoader:
         Returns:
             Metadata dict or None.
         """
-        content = self.load_skill(name)
-        if not content:
-            return None
+        # Check workspace first
+        workspace_skill = self.workspace_skills / name / "SKILL.md"
+        if (cached := self._get_cached_skill(workspace_skill)):
+            return cached["metadata"]
         
-        if content.startswith("---"):
-            match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
-            if match:
-                # Simple YAML parsing
-                metadata = {}
-                for line in match.group(1).split("\n"):
-                    if ":" in line:
-                        key, value = line.split(":", 1)
-                        metadata[key.strip()] = value.strip().strip('"\'')
-                return metadata
+        # Check built-in
+        if self.builtin_skills:
+            builtin_skill = self.builtin_skills / name / "SKILL.md"
+            if (cached := self._get_cached_skill(builtin_skill)):
+                return cached["metadata"]
         
         return None
