@@ -26,6 +26,10 @@ class Session:
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     
+    # Track persistence state to optimize writes
+    _persisted_count: int = field(default=0, init=False)
+    _persisted_metadata: dict = field(default_factory=dict, init=False)
+
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -106,6 +110,10 @@ class SessionManager:
             return None
         
         try:
+            # Use file mtime for updated_at as metadata might be stale due to append optimization
+            mtime = path.stat().st_mtime
+            updated_at_from_mtime = datetime.fromtimestamp(mtime)
+
             messages = []
             metadata = {}
             created_at = None
@@ -119,17 +127,22 @@ class SessionManager:
                     data = json.loads(line)
                     
                     if data.get("_type") == "metadata":
-                        metadata = data.get("metadata", {})
+                        metadata = data.get("metadata") or {}
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
                     else:
                         messages.append(data)
             
-            return Session(
+            session = Session(
                 key=key,
                 messages=messages,
                 created_at=created_at or datetime.now(),
+                updated_at=updated_at_from_mtime,
                 metadata=metadata
             )
+            # Initialize persistence state
+            session._persisted_count = len(messages)
+            session._persisted_metadata = metadata.copy()
+            return session
         except Exception as e:
             logger.warning(f"Failed to load session {key}: {e}")
             return None
@@ -138,20 +151,47 @@ class SessionManager:
         """Save a session to disk."""
         path = self._get_session_path(session.key)
         
-        with open(path, "w") as f:
-            # Write metadata first
-            metadata_line = {
-                "_type": "metadata",
-                "created_at": session.created_at.isoformat(),
-                "updated_at": session.updated_at.isoformat(),
-                "metadata": session.metadata
-            }
-            f.write(json.dumps(metadata_line) + "\n")
-            
-            # Write messages
-            for msg in session.messages:
-                f.write(json.dumps(msg) + "\n")
+        # Check if we can just append
+        # Conditions: file exists, metadata unchanged, messages strictly appended
+        # NOTE: This assumes that session history is strictly append-only.
+        # If past messages are modified without changing length, this optimization might
+        # skip saving changes unless count matches len (which triggers rewrite in else block).
+        # We assume modification of past messages is rare or accompanied by length change.
+        can_append = (
+            path.exists() and
+            session.metadata == session._persisted_metadata and
+            session._persisted_count < len(session.messages)
+        )
         
+        if can_append:
+            # Append new messages
+            with open(path, "a") as f:
+                for msg in session.messages[session._persisted_count:]:
+                    f.write(json.dumps(msg) + "\n")
+
+            # Update persisted state
+            session._persisted_count = len(session.messages)
+
+        else:
+            # Full rewrite needed (if edits occurred, metadata changed, or first save)
+            with open(path, "w") as f:
+                # Write metadata first
+                metadata_line = {
+                    "_type": "metadata",
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "metadata": session.metadata
+                }
+                f.write(json.dumps(metadata_line) + "\n")
+
+                # Write messages
+                for msg in session.messages:
+                    f.write(json.dumps(msg) + "\n")
+
+            # Update persisted state
+            session._persisted_count = len(session.messages)
+            session._persisted_metadata = session.metadata.copy()
+
         self._cache[session.key] = session
     
     def delete(self, key: str) -> bool:
@@ -214,10 +254,12 @@ class SessionManager:
                         if first_line:
                             data = json.loads(first_line)
                             if data.get("_type") == "metadata":
+                                # Use mtime for updated_at as it's more reliable with append-only updates
+                                updated_at = datetime.fromtimestamp(mtime).isoformat()
                                 session_info = {
                                     "key": path.stem.replace("_", ":"),
                                     "created_at": data.get("created_at"),
-                                    "updated_at": data.get("updated_at"),
+                                    "updated_at": updated_at,
                                     "path": str(path)
                                 }
                                 sessions.append(session_info)
