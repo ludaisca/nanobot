@@ -78,6 +78,7 @@ class AgentLoop:
         self._active_consolidations = set()
         self._background_tasks = set()
         self._running = False
+        self._stop_event = asyncio.Event()
         self._register_default_tools()
     
     def _register_default_tools(self) -> None:
@@ -115,35 +116,74 @@ class AgentLoop:
     async def run(self) -> None:
         """Run the agent loop, processing messages from the bus."""
         self._running = True
+        self._stop_event.clear()
         logger.info("Agent loop started")
         
-        while self._running:
-            try:
-                # Wait for next message
-                msg = await asyncio.wait_for(
-                    self.bus.consume_inbound(),
-                    timeout=1.0
-                )
+        # Start consuming messages in background
+        consume_task = asyncio.create_task(self.bus.consume_inbound())
+
+        try:
+            while self._running:
+                # Wait for either a message or stop signal
+                stop_task = asyncio.create_task(self._stop_event.wait())
                 
-                # Process it
                 try:
-                    response = await self._process_message(msg)
-                    if response:
-                        await self.bus.publish_outbound(response)
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
-                    # Send error response
-                    await self.bus.publish_outbound(OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=f"Sorry, I encountered an error: {str(e)}"
-                    ))
-            except asyncio.TimeoutError:
-                continue
+                    done, pending = await asyncio.wait(
+                        [consume_task, stop_task],
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+
+                    # If stop event triggered
+                    if stop_task in done:
+                        break
+
+                    # If message received, cancel stop waiter
+                    stop_task.cancel()
+
+                    # Process message
+                    try:
+                        msg = consume_task.result()
+
+                        try:
+                            response = await self._process_message(msg)
+                            if response:
+                                await self.bus.publish_outbound(response)
+                        except Exception as e:
+                            logger.error(f"Error processing message: {e}")
+                            await self.bus.publish_outbound(OutboundMessage(
+                                channel=msg.channel,
+                                chat_id=msg.chat_id,
+                                content=f"Sorry, I encountered an error: {str(e)}"
+                            ))
+
+                        # Prepare for next message
+                        consume_task = asyncio.create_task(self.bus.consume_inbound())
+
+                    except Exception as e:
+                        logger.error(f"Error retrieving message: {e}")
+                        # If current task failed, recreate it to keep loop alive
+                        if consume_task.done():
+                            consume_task = asyncio.create_task(self.bus.consume_inbound())
+
+                except asyncio.CancelledError:
+                    # If run() is cancelled, clean up local tasks
+                    stop_task.cancel()
+                    raise
+
+        finally:
+            # Ensure background consume task is cleaned up
+            if not consume_task.done():
+                consume_task.cancel()
+                try:
+                    await consume_task
+                except asyncio.CancelledError:
+                    pass
+            self._running = False
     
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
+        self._stop_event.set()
         logger.info("Agent loop stopping")
     
     async def _process_message(self, msg: InboundMessage, session_key: str | None = None) -> OutboundMessage | None:
