@@ -1,10 +1,11 @@
 """Session management for conversation history."""
 
+import copy
 import json
 import os
-from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -16,16 +17,18 @@ from nanobot.utils.helpers import ensure_dir, safe_filename
 class Session:
     """
     A conversation session.
-    
+
     Stores messages in JSONL format for easy reading and persistence.
     """
-    
+
     key: str  # channel:chat_id
     messages: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    
+    _persisted_count: int = field(default=0, init=False, repr=False)
+    _persisted_metadata: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
+
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -36,23 +39,23 @@ class Session:
         }
         self.messages.append(msg)
         self.updated_at = datetime.now()
-    
+
     def get_history(self, max_messages: int = 50) -> list[dict[str, Any]]:
         """
         Get message history for LLM context.
-        
+
         Args:
             max_messages: Maximum messages to return.
-        
+
         Returns:
             List of messages in LLM format.
         """
         # Get recent messages
         recent = self.messages[-max_messages:] if len(self.messages) > max_messages else self.messages
-        
+
         # Convert to LLM format (just role and content)
         return [{"role": m["role"], "content": m["content"]} for m in recent]
-    
+
     def clear(self) -> None:
         """Clear all messages in the session."""
         self.messages = []
@@ -62,122 +65,147 @@ class Session:
 class SessionManager:
     """
     Manages conversation sessions.
-    
+
     Sessions are stored as JSONL files in the sessions directory.
     """
-    
+
     def __init__(self, workspace: Path):
         self.workspace = workspace
         self.sessions_dir = ensure_dir(Path.home() / ".nanobot" / "sessions")
         self._cache: dict[str, Session] = {}
-    
+
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
         safe_key = safe_filename(key.replace(":", "_"))
         return self.sessions_dir / f"{safe_key}.jsonl"
-    
+
     def get_or_create(self, key: str) -> Session:
         """
         Get an existing session or create a new one.
-        
+
         Args:
             key: Session key (usually channel:chat_id).
-        
+
         Returns:
             The session.
         """
         # Check cache
         if key in self._cache:
             return self._cache[key]
-        
+
         # Try to load from disk
         session = self._load(key)
         if session is None:
             session = Session(key=key)
-        
+
         self._cache[key] = session
         return session
-    
+
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
         path = self._get_session_path(key)
-        
+
         if not path.exists():
             return None
-        
+
         try:
             messages = []
             metadata = {}
             created_at = None
-            
+
             with open(path) as f:
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
-                    
+
                     data = json.loads(line)
-                    
+
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
                     else:
                         messages.append(data)
-            
-            return Session(
+
+            session = Session(
                 key=key,
                 messages=messages,
                 created_at=created_at or datetime.now(),
+                updated_at=datetime.fromtimestamp(path.stat().st_mtime),
                 metadata=metadata
             )
+            session._persisted_count = len(messages)
+            session._persisted_metadata = copy.deepcopy(metadata)
+            return session
         except Exception as e:
             logger.warning(f"Failed to load session {key}: {e}")
             return None
-    
+
     def save(self, session: Session) -> None:
         """Save a session to disk."""
         path = self._get_session_path(session.key)
-        
-        with open(path, "w") as f:
-            # Write metadata first
-            metadata_line = {
-                "_type": "metadata",
-                "created_at": session.created_at.isoformat(),
-                "updated_at": session.updated_at.isoformat(),
-                "metadata": session.metadata
-            }
-            f.write(json.dumps(metadata_line) + "\n")
-            
-            # Write messages
-            for msg in session.messages:
-                f.write(json.dumps(msg) + "\n")
-        
+
+        # Check if we can just append
+        # We need metadata to be unchanged (except potentially updated_at which we don't check here)
+        # And messages must be a superset of persisted messages
+        can_append = (
+            path.exists() and
+            session.metadata == session._persisted_metadata and
+            len(session.messages) >= session._persisted_count and
+            # Ideally we check content match, but for performance we trust append-only usage
+            # session.messages[:session._persisted_count] matches persisted
+            True
+        )
+
+        if can_append and len(session.messages) > session._persisted_count:
+            with open(path, "a") as f:
+                for msg in session.messages[session._persisted_count:]:
+                    f.write(json.dumps(msg) + "\n")
+        elif not can_append or not path.exists():
+            # Full rewrite
+            with open(path, "w") as f:
+                # Write metadata first
+                metadata_line = {
+                    "_type": "metadata",
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "metadata": session.metadata
+                }
+                f.write(json.dumps(metadata_line) + "\n")
+
+                # Write messages
+                for msg in session.messages:
+                    f.write(json.dumps(msg) + "\n")
+
+        # Update persistence tracking
+        session._persisted_count = len(session.messages)
+        session._persisted_metadata = copy.deepcopy(session.metadata)
         self._cache[session.key] = session
-    
+
     def delete(self, key: str) -> bool:
         """
         Delete a session.
-        
+
         Args:
             key: Session key.
-        
+
         Returns:
             True if deleted, False if not found.
         """
         # Remove from cache
         self._cache.pop(key, None)
-        
+
         # Remove file
         path = self._get_session_path(key)
         if path.exists():
             path.unlink()
             return True
         return False
-    
+
     def list_sessions(self) -> list[dict[str, Any]]:
         """
         List all sessions.
-        
+
         Returns:
             List of session info dicts.
         """
@@ -203,6 +231,8 @@ class SessionManager:
 
             if cached_entry and cached_entry.get("mtime") == mtime:
                 session_info = cached_entry["data"]
+                # Always use current mtime for updated_at
+                session_info["updated_at"] = datetime.fromtimestamp(mtime).isoformat()
                 sessions.append(session_info)
                 updated_cache[entry.name] = cached_entry
             else:
@@ -217,7 +247,7 @@ class SessionManager:
                                 session_info = {
                                     "key": path.stem.replace("_", ":"),
                                     "created_at": data.get("created_at"),
-                                    "updated_at": data.get("updated_at"),
+                                    "updated_at": datetime.fromtimestamp(mtime).isoformat(),
                                     "path": str(path)
                                 }
                                 sessions.append(session_info)
