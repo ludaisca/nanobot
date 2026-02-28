@@ -22,7 +22,23 @@ class SkillsLoader:
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self._file_cache: dict[str, dict[str, float | str]] = {}
     
+    def _read_file_cached(self, path: Path) -> str | None:
+        """Read a file with in-memory caching based on modification time."""
+        path_str = str(path)
+        try:
+            mtime = path.stat().st_mtime
+            cached = self._file_cache.get(path_str)
+            if cached and cached["mtime"] == mtime:
+                return cached["content"]
+
+            content = path.read_text(encoding="utf-8")
+            self._file_cache[path_str] = {"mtime": mtime, "content": content}
+            return content
+        except OSError:
+            return None
+
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
         List all available skills.
@@ -68,14 +84,16 @@ class SkillsLoader:
         """
         # Check workspace first
         workspace_skill = self.workspace_skills / name / "SKILL.md"
-        if workspace_skill.exists():
-            return workspace_skill.read_text(encoding="utf-8")
+        content = self._read_file_cached(workspace_skill)
+        if content is not None:
+            return content
         
         # Check built-in
         if self.builtin_skills:
             builtin_skill = self.builtin_skills / name / "SKILL.md"
-            if builtin_skill.exists():
-                return builtin_skill.read_text(encoding="utf-8")
+            content = self._read_file_cached(builtin_skill)
+            if content is not None:
+                return content
         
         return None
     
