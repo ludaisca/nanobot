@@ -22,6 +22,12 @@ class SkillsLoader:
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+
+        # Performance caches
+        # Mapping: path_str -> (mtime, content)
+        self._file_cache: dict[str, tuple[float, str]] = {}
+        # Mapping: binary_name -> bool (availability)
+        self._which_cache: dict[str, bool] = {}
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -69,15 +75,31 @@ class SkillsLoader:
         # Check workspace first
         workspace_skill = self.workspace_skills / name / "SKILL.md"
         if workspace_skill.exists():
-            return workspace_skill.read_text(encoding="utf-8")
+            return self._read_skill_file(workspace_skill)
         
         # Check built-in
         if self.builtin_skills:
             builtin_skill = self.builtin_skills / name / "SKILL.md"
             if builtin_skill.exists():
-                return builtin_skill.read_text(encoding="utf-8")
+                return self._read_skill_file(builtin_skill)
         
         return None
+
+    def _read_skill_file(self, path: Path) -> str:
+        """Read a skill file with mtime-based caching to avoid disk I/O."""
+        path_str = str(path)
+        try:
+            mtime = os.path.getmtime(path_str)
+            # Return cached content if file hasn't changed
+            if path_str in self._file_cache and self._file_cache[path_str][0] == mtime:
+                return self._file_cache[path_str][1]
+
+            content = path.read_text(encoding="utf-8")
+            self._file_cache[path_str] = (mtime, content)
+            return content
+        except OSError:
+            # Re-raise to match the original behavior if reading fails
+            raise
     
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
@@ -139,12 +161,18 @@ class SkillsLoader:
         
         return "\n".join(lines)
     
+    def _check_bin(self, b: str) -> bool:
+        """Cache shutil.which to avoid redundant process calls/disk I/O."""
+        if b not in self._which_cache:
+            self._which_cache[b] = shutil.which(b) is not None
+        return self._which_cache[b]
+
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""
         missing = []
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
-            if not shutil.which(b):
+            if not self._check_bin(b):
                 missing.append(f"CLI: {b}")
         for env in requires.get("env", []):
             if not os.environ.get(env):
@@ -178,7 +206,7 @@ class SkillsLoader:
         """Check if skill requirements are met (bins, env vars)."""
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
-            if not shutil.which(b):
+            if not self._check_bin(b):
                 return False
         for env in requires.get("env", []):
             if not os.environ.get(env):
