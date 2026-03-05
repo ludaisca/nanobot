@@ -22,6 +22,8 @@ class SkillsLoader:
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
+        self._file_cache: dict[str, tuple[float, str]] = {}
+        self._which_cache: dict[str, bool] = {}
     
     def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
         """
@@ -68,16 +70,33 @@ class SkillsLoader:
         """
         # Check workspace first
         workspace_skill = self.workspace_skills / name / "SKILL.md"
-        if workspace_skill.exists():
-            return workspace_skill.read_text(encoding="utf-8")
+
+        content = self._read_with_cache(workspace_skill)
+        if content is not None:
+            return content
         
         # Check built-in
         if self.builtin_skills:
             builtin_skill = self.builtin_skills / name / "SKILL.md"
-            if builtin_skill.exists():
-                return builtin_skill.read_text(encoding="utf-8")
+            return self._read_with_cache(builtin_skill)
         
         return None
+
+    def _read_with_cache(self, path: Path) -> str | None:
+        """Helper to read file with mtime cache."""
+        try:
+            mtime = os.path.getmtime(path)
+            str_path = str(path)
+            if str_path in self._file_cache:
+                cached_mtime, cached_content = self._file_cache[str_path]
+                if cached_mtime == mtime:
+                    return cached_content
+
+            content = path.read_text(encoding="utf-8")
+            self._file_cache[str_path] = (mtime, content)
+            return content
+        except OSError:
+            return None
     
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
@@ -144,7 +163,10 @@ class SkillsLoader:
         missing = []
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
-            if not shutil.which(b):
+            # Only cache positive hits, re-check negative hits in case they were installed
+            if b not in self._which_cache or not self._which_cache[b]:
+                self._which_cache[b] = shutil.which(b) is not None
+            if not self._which_cache[b]:
                 missing.append(f"CLI: {b}")
         for env in requires.get("env", []):
             if not os.environ.get(env):
@@ -178,7 +200,10 @@ class SkillsLoader:
         """Check if skill requirements are met (bins, env vars)."""
         requires = skill_meta.get("requires", {})
         for b in requires.get("bins", []):
-            if not shutil.which(b):
+            # Only cache positive hits, re-check negative hits in case they were installed
+            if b not in self._which_cache or not self._which_cache[b]:
+                self._which_cache[b] = shutil.which(b) is not None
+            if not self._which_cache[b]:
                 return False
         for env in requires.get("env", []):
             if not os.environ.get(env):
