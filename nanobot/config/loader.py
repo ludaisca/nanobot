@@ -15,21 +15,22 @@ def get_config_path() -> Path:
 def get_data_dir() -> Path:
     """Get the nanobot data directory."""
     from nanobot.utils.helpers import get_data_path
+
     return get_data_path()
 
 
 def load_config(config_path: Path | None = None) -> Config:
     """
     Load configuration from file or create default.
-    
+
     Args:
         config_path: Optional path to config file. Uses default if not provided.
-    
+
     Returns:
         Loaded configuration object.
     """
     path = config_path or get_config_path()
-    
+
     if path.exists():
         try:
             with open(path) as f:
@@ -39,25 +40,25 @@ def load_config(config_path: Path | None = None) -> Config:
         except (json.JSONDecodeError, ValueError) as e:
             print(f"Warning: Failed to load config from {path}: {e}")
             print("Using default configuration.")
-    
+
     return Config()
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
     """
     Save configuration to file.
-    
+
     Args:
         config: Configuration to save.
         config_path: Optional path to save to. Uses default if not provided.
     """
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Convert to camelCase format
     data = config.model_dump()
     data = convert_to_camel(data)
-    
+
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -91,7 +92,15 @@ def convert_to_camel(data: Any) -> Any:
 
 
 def camel_to_snake(name: str) -> str:
-    """Convert camelCase to snake_case."""
+    """
+    Convert camelCase to snake_case.
+
+    Optimized:
+    - Fast path for already snake_case strings.
+    - Uses list accumulation over generator expression for speed.
+    """
+    if "_" in name or name.islower():
+        return name
     result = []
     for i, char in enumerate(name):
         if char.isupper() and i > 0:
@@ -101,6 +110,14 @@ def camel_to_snake(name: str) -> str:
 
 
 def snake_to_camel(name: str) -> str:
-    """Convert snake_case to camelCase."""
+    """
+    Convert snake_case to camelCase.
+
+    Optimized:
+    - Fast path for strings without underscores.
+    - Uses list comprehension instead of generator expression for speed.
+    """
+    if "_" not in name:
+        return name
     components = name.split("_")
-    return components[0] + "".join(x.title() for x in components[1:])
+    return components[0] + "".join([x.title() for x in components[1:]])
