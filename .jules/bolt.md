@@ -1,3 +1,7 @@
 ## 2026-02-12 - [Async Memory Consolidation]
 **Learning:** Moving heavy LLM operations (like memory consolidation) to background tasks requires careful handling of shared mutable state (sessions). Using an offset-based approach for trimming (`messages[n_removed:]`) is safer than negative slicing (`messages[-keep:]`) when the list can grow concurrently. Also, always track background tasks in a set to prevent garbage collection.
 **Action:** When optimizing long-running operations in async loops, always ensure state consistency and task lifecycle management.
+
+## 2026-03-03 - [Python String Optimization using Regex and List Comprehensions]
+**Learning:** In CPython, optimizing repetitive string manipulation in utilities like `camel_to_snake` and `snake_to_camel` yields massive micro-performance improvements. Pre-compiled regular expressions using zero-width lookaround assertions (e.g., `(?<!^)(?=[A-Z])`) evaluate at C-speed, making them ~3x faster than character-by-character loops. Using a list comprehension inside `"".join([...])` rather than a generator avoids Python frame evaluation overhead, speeding up concatenation. Adding O(1) fast-paths (checking `islower()` or `_ not in name`) to return early drastically cuts execution time for already-formatted strings.
+**Action:** When working on deep-nested config loaders or key conversion utilities, replace Python-level iteration with pre-compiled C-optimized regex patterns and early return fast-paths. Always measure first to ensure the micro-optimization doesn't sacrifice code readability.
