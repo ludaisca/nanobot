@@ -1,10 +1,13 @@
 """Configuration loading utilities."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from nanobot.config.schema import Config
+
+_CAMEL_TO_SNAKE_RE = re.compile(r'(?<!^)(?=[A-Z])')
 
 
 def get_config_path() -> Path:
@@ -92,15 +95,17 @@ def convert_to_camel(data: Any) -> Any:
 
 def camel_to_snake(name: str) -> str:
     """Convert camelCase to snake_case."""
-    result = []
-    for i, char in enumerate(name):
-        if char.isupper() and i > 0:
-            result.append("_")
-        result.append(char.lower())
-    return "".join(result)
+    # Fast path for strings that are already lowercase
+    if name.islower():
+        return name
+    return _CAMEL_TO_SNAKE_RE.sub('_', name).lower()
 
 
 def snake_to_camel(name: str) -> str:
     """Convert snake_case to camelCase."""
+    # Fast path for strings without underscores
+    if "_" not in name:
+        return name
     components = name.split("_")
-    return components[0] + "".join(x.title() for x in components[1:])
+    # Use list comprehension which is faster than generator expression in "".join()
+    return components[0] + "".join([x.title() for x in components[1:]])
