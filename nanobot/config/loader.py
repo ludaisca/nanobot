@@ -1,6 +1,7 @@
 """Configuration loading utilities."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -90,17 +91,24 @@ def convert_to_camel(data: Any) -> Any:
     return data
 
 
+_CAMEL_RE = re.compile(r'(?<!^)(?=[A-Z])')
+
 def camel_to_snake(name: str) -> str:
-    """Convert camelCase to snake_case."""
-    result = []
-    for i, char in enumerate(name):
-        if char.isupper() and i > 0:
-            result.append("_")
-        result.append(char.lower())
-    return "".join(result)
+    """
+    Convert camelCase to snake_case.
+    Optimized: Fast-path for already lowercased strings, and regex-based replacement.
+    """
+    if name.islower():
+        return name
+    return _CAMEL_RE.sub('_', name).lower()
 
 
 def snake_to_camel(name: str) -> str:
-    """Convert snake_case to camelCase."""
+    """
+    Convert snake_case to camelCase.
+    Optimized: Fast-path for strings without underscores, and list comprehension in join.
+    """
+    if "_" not in name:
+        return name
     components = name.split("_")
-    return components[0] + "".join(x.title() for x in components[1:])
+    return components[0] + "".join([x.title() for x in components[1:]])
