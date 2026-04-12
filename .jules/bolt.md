@@ -1,3 +1,6 @@
 ## 2026-02-12 - [Async Memory Consolidation]
 **Learning:** Moving heavy LLM operations (like memory consolidation) to background tasks requires careful handling of shared mutable state (sessions). Using an offset-based approach for trimming (`messages[n_removed:]`) is safer than negative slicing (`messages[-keep:]`) when the list can grow concurrently. Also, always track background tasks in a set to prevent garbage collection.
 **Action:** When optimizing long-running operations in async loops, always ensure state consistency and task lifecycle management.
+## 2026-02-12 - [In-Memory File Caching for Repeated Reads]
+**Learning:** `SkillsLoader` was repeatedly executing redundant disk I/O when parsing `SKILL.md` frontmatter across various progressive loading methods (`list_skills`, `build_skills_summary`, `get_skill_metadata`). Caching file contents in-memory based on `st_mtime` provides a safe, significant performance boost without sacrificing freshness. Also, scratchpad/profiling scripts must be aggressively cleaned up before pre-commit.
+**Action:** When working with systems that load many small files repeatedly (like plugin or skill loaders), always consider a simple `st_mtime` cache. Ensure strict cleanup of all temporary workspace files.
