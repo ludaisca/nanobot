@@ -1,3 +1,6 @@
 ## 2026-02-12 - [Async Memory Consolidation]
 **Learning:** Moving heavy LLM operations (like memory consolidation) to background tasks requires careful handling of shared mutable state (sessions). Using an offset-based approach for trimming (`messages[n_removed:]`) is safer than negative slicing (`messages[-keep:]`) when the list can grow concurrently. Also, always track background tasks in a set to prevent garbage collection.
 **Action:** When optimizing long-running operations in async loops, always ensure state consistency and task lifecycle management.
+## 2026-02-12 - [Parallel Tool Execution]
+**Learning:** Sequential execution of LLM tool calls creates a significant I/O bottleneck when multiple independent tools are invoked. Using `asyncio.gather` for parallel execution drastically reduces latency. However, handling exceptions requires carefully passing `return_exceptions=True` and correctly mapping results back to tool calls (e.g., using `zip`) rather than returning exceptions as tuple parts which could lead to unpacking errors.
+**Action:** Always parallelize independent LLM tool calls using `asyncio.gather(..., return_exceptions=True)` to improve latency and securely zip the original requests with gathered results to handle errors gracefully.
